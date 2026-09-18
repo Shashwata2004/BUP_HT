@@ -6,6 +6,17 @@ A Python 3.12 backend for the 24-hour campus energy challenge. It interprets all
 operator notes -> Groq LLM -> deterministic guardrails -> HiGHS optimizer -> final replay validator
 ```
 
+## Live submission endpoints
+
+| Item | Value |
+| --- | --- |
+| Public API | `https://bup-ht.onrender.com` |
+| Health | `GET https://bup-ht.onrender.com/health` |
+| Optimization | `POST https://bup-ht.onrender.com/optimize-energy` |
+| Docker fallback | `ghcr.io/shashwata2004/bup_ht@sha256:fb6d6d3e5e65520368e317f34716b4c7facdf2fdbca3a7be03f011e8af1cd318` |
+
+The Render service was externally verified with exact health JSON, a real Groq-backed request, and all ten official public cases. The deployed official-case run passed 10/10 with exact organizer-optimal costs; measured request latency was p50 1.471 seconds and p95/max 2.017 seconds.
+
 ## Organizer files (kept locally)
 
 `data/` is ignored by Git. The organizer PDFs and public sample JSON are supplied separately and are not included in new clones. Neither PDF explicitly requires committing those original files. The guide does require reproducible public-sample testing, so restore the JSON before running the public-case commands below. Run these commands from the repository root after cloning:
@@ -145,6 +156,8 @@ python scripts/smoke_test.py --docker-image gridwise:latest --requests 100 --wor
 
 The tracked `tests/data/semantic_hidden_style_cases.json` contains 150 independently authored notes in 50 three-note requests (25 notes per type). Its offline tests validate fixture shape, provider normalization and complete scheduling, **not language accuracy**. It includes unambiguous time boundaries, overlapping different directive types, energy-related distractors, and 30 adversarial notes, including long irrelevant context. See the [risk audit](docs/hidden-test-risk-audit.md) for assumptions and independently checked optimality.
 
+The separate `tests/data/semantic_red_team_cases.json` adds 54 notes in 18 requests for reduction-to versus reduction-by percentages, zero/one factors, noon/midnight/24:00 and overnight windows, negation and cancelled restrictions, soft preferences, quoted/historical/hypothetical statements, numeric boundaries, and instruction attacks. Its live run passed 54/54; the corresponding offline tests also reject 5,000 structured-output mutations and 1,004 malformed or truncated provider responses.
+
 General offline tests use an independently constructed synthetic fixture and cover the exact schemas, all directive types, no-op, malformed output and repair, provider failures, prompt isolation, percentage/time output handling, battery transitions, rates, reserves, energy balance, neutrality, solar/grid restrictions, simultaneous directives, corrupted plans, safe errors, and 50 seeded scenarios checked against an independent exhaustive battery-state dynamic program. Mocked normalization tests check the adapter/guardrail path; they do **not** prove real-model language understanding.
 
 `--offline` reads the expected interpretation from each organizer case, passes it through our guardrails and optimizer, independently replays the plan, and compares cost against the organizer optimum within 0.01 BDT. **Expected result: 10/10**, with zero cost difference on the current baseline. Equivalent optimal action sequences are accepted. The official files remain unchanged in local, Git-ignored `data/`; production modules never read them, and the Docker image excludes them. Public wording, IDs, numeric values, and reference schedules are not hard-coded in application logic.
@@ -162,6 +175,9 @@ python scripts/run_live_benchmark.py
 python scripts/run_live_benchmark.py --suite tests/data/semantic_hidden_style_cases.json --pace-seconds 10
 # A focused rerun can select one or more --request IDs from that same JSON.
 
+# Final 54-note semantic red team (incurs 18 model calls normally).
+python scripts/run_live_benchmark.py --suite tests/data/semantic_red_team_cases.json --pace-seconds 7.5
+
 # Small two-request concurrent real-provider benchmark (incurs quota).
 # Run separately from other live suites to avoid overlapping quota consumption.
 python scripts/run_burst_benchmark.py
@@ -171,7 +187,7 @@ python scripts/smoke_test.py --live
 
 # All cases against a running local service or a deployed API.
 python scripts/run_public_cases.py
-python scripts/run_public_cases.py --url https://YOUR-DEPLOYED-HOST
+python scripts/run_public_cases.py --url https://bup-ht.onrender.com
 
 # Optional pytest E2E tests, skipped unless explicitly enabled and configured.
 RUN_LIVE_LLM=1 pytest -q -m live
@@ -179,7 +195,7 @@ RUN_LIVE_LLM=1 pytest -q -m live
 
 The public runner checks interpretation semantics, ignores explanation wording, replays against both reported directives and organizer ground truth, validates schema/aggregates, compares cost, and reports calls, retries, token usage, and p50/p95/max timing. Live/API runners pause 7.5 seconds between calls by default to reduce Groq free-tier throttling; this pause is outside reported request latency and can be changed with `--pace-seconds`. Public live pytest cases use the same pacing. The synthetic benchmark reports overall/per-directive accuracy, no-op accuracy, time-window accuracy on applicable notes, numeric accuracy on numeric directives, and invalid-output/retry rates. Transport failures count as failed requests and remain in latency statistics; a persistent provider failure stops a direct live suite and reports unattempted cases explicitly. Use `--case SAMPLE-XX` on the public runner or `--request REQUEST-ID` on the synthetic runner for focused reruns. Normal pytest skips every network test unless `RUN_LIVE_LLM=1`. Full score latency requires p95 ≤5 seconds; ≤15 seconds earns partial latency credit.
 
-The earlier baseline live runs passed 10/10 official cases with exact optimal costs and 48/48 synthetic notes, including attack-bearing notes. Public p50/p95/max were 1.411/2.090/2.090 seconds; synthetic timings were 1.812/2.839/2.839 seconds. See [live verification](docs/live-verification.md) for the expanded hidden-case results, current measurements, methodology and limitations. Measured samples do not guarantee hidden wording accuracy or future provider availability.
+The current offline suite passes **1,592 tests**, with 12 explicitly opt-in live tests skipped and one upstream Starlette/AnyIO deprecation warning. The live runs passed 10/10 official cases, 150/150 expanded hidden-style notes, and 54/54 final semantic red-team notes. The final red-team run used 18 calls with zero retries, repairs, invalid outputs, or provider failures; p50 was 1.832 seconds and p95/max was 2.739 seconds. See [live verification](docs/live-verification.md) for methodology, earlier measurements, and limitations. Measured samples do not guarantee hidden wording accuracy or future provider availability.
 
 By default, `smoke_test.py` starts actual uvicorn processes, a clearly isolated mock model provider, and verifies health plus 24 POSTs using eight concurrent clients. It makes no paid calls and shuts down its processes. `--live` instead uses the configured provider for exactly one POST. The mock provider lives under `tests/` and cannot be enabled in the production image.
 
@@ -198,18 +214,17 @@ python scripts/smoke_test.py --docker-image gridwise:latest
 python scripts/smoke_test.py --docker-image gridwise:latest --live
 ```
 
-The image binds to `0.0.0.0:8000`, runs as non-root UID 10001, has a healthcheck, and uses pinned runtime dependencies. The Docker context is allowlisted to application code, requirements, and Dockerfile; it excludes `.env`, tests, samples, PDFs, Git, caches, and credentials. The base image has an exact Python patch tag. For final submission, additionally pin the published image by digest.
-
-A registry image has **not** been pushed in this phase. Once the intended registry is configured and publication is authorized, tag/push the tested image and replace the placeholders below with the actual pullable reference and exact digest:
+The image binds to `0.0.0.0:8000`, runs as non-root UID 10001, has a healthcheck, and uses pinned runtime dependencies. The Docker context is allowlisted to application code, requirements, and Dockerfile; it excludes `.env`, tests, samples, PDFs, Git, caches, and credentials. The base image has an exact Python patch tag. The published image is pinned below by its registry digest:
 
 ```bash
-docker pull REGISTRY/OWNER/gridwise@sha256:ACTUAL_DIGEST
-docker run --rm -p 8000:8000 --env-file .env REGISTRY/OWNER/gridwise@sha256:ACTUAL_DIGEST
+image='ghcr.io/shashwata2004/bup_ht@sha256:fb6d6d3e5e65520368e317f34716b4c7facdf2fdbca3a7be03f011e8af1cd318'
+docker pull "$image"
+docker run --rm -p 8000:8000 --env-file .env "$image"
 ```
 
-The submission fallback image is `ghcr.io/shashwata2004/bup_ht:bup-preli-2026`. Its exact pushed digest and the public Koyeb endpoint are recorded in [submission information](docs/submission-info.md). Keep the image pullable throughout evaluation and verify the hosted API from outside the development network.
+The equivalent tagged reference is `ghcr.io/shashwata2004/bup_ht:bup-preli-2026`. The pushed image was pulled back from GHCR and passed `/health` plus one real Groq optimization request with the key supplied only at runtime. The GHCR package is currently private during the event; it must be made publicly pullable for organizer evaluation after the deadline. See [submission information](docs/submission-info.md).
 
-## Reproducibility, security, and limitations
+## Reproducibility, security, and known limitations
 
 - `requirements.txt` pins runtime and transitive versions; `requirements-dev.txt` pins the tested developer environment. `requirements.in` records direct runtime dependencies. Python, FastAPI, Pydantic, HTTPX, NumPy, SciPy/HiGHS, uvicorn, python-dotenv, pytest, and Ruff are credited external dependencies. OpenAI Codex assisted implementation; no external project solution was copied.
 - No secrets are embedded, committed, logged, or returned. Keys are read through a secret-valued configuration field. HTTPX URL logging is disabled, redirects are not followed, and provider failures expose only stable application error codes. The public judge endpoints have no authentication as required; protect deployment account credentials separately.
@@ -217,6 +232,6 @@ The submission fallback image is `ghcr.io/shashwata2004/bup_ht:bup-preli-2026`. 
 - The canonical statement does not define overlapping solar-reduction precedence. We apply notes in order, each assigning `original_solar * factor` exactly as its equation states. This is a documented assumption; obtain organizer clarification before relying on overlapping solar cases. Repeated reserve/grid restrictions combine by max/min. Explicit overnight windows use sorted hours within the cyclic day; ambiguous or unsupported note semantics remain a model risk.
 - Zero capacity/rates, zero tariff/demand, excess solar, reversed input-hour order, and infeasible scenarios are tested. Extremely ill-conditioned values may lead to controlled solver/replay failure rather than a misleading successful plan. No arbitrary upper bound is imposed on otherwise finite scenario numbers.
 - One optimal schedule is returned. Cost ties may have different action sequences across solver releases; exact pinned builds are reproducible, and the official judge accepts equivalent optima.
-- Public hosting, a published registry reference, an externally verified endpoint, and the required ≤3-minute video remain submission work. Groq is now selected and tested. Keep the repository private during the event; visibility changes require a later explicit user instruction.
+- Public hosting and the published registry artifact are complete and externally verified. Before evaluation, publish the final video URL, make the GHCR package pullable, and follow the organizer's instruction to make the source repository public after the deadline. Until then, keep the source repository private.
 
 See [acceptance criteria](docs/acceptance.md) for the extracted contract/rubric and [verification record](docs/verification.md) for commands and measured baseline results.

@@ -2,9 +2,18 @@
 
 Verified on 2026-09-18. These results measure this local environment and account, not hidden judge performance or burst capacity. The optimizer, replay validator, public API schemas, endpoints, and solver dependencies were preserved.
 
+## Current submission state
+
+- Offline suite: **1,592 passed**, 12 explicitly skipped live tests, one unchanged upstream warning.
+- Final semantic red team: **54/54 notes** across 18 requests, with 100% type, time-window, numeric, and no-op accuracy; zero retries, repairs, invalid outputs, or provider failures; p50 1.832 seconds and p95/max 2.739 seconds.
+- Public Render API: `https://bup-ht.onrender.com`; exact `/health` response and a real Groq-backed POST reverified on 2026-09-18.
+- Deployed official cases: **10/10**, exact organizer-optimal costs; p50 1.471 seconds and p95/max 2.017 seconds.
+- GHCR fallback: `ghcr.io/shashwata2004/bup_ht@sha256:fb6d6d3e5e65520368e317f34716b4c7facdf2fdbca3a7be03f011e8af1cd318`; remote pull, health, and real Groq POST passed. Package visibility remains private until the post-deadline publication step.
+- Source repository remains private during the event as required.
+
 ## Hidden-case stress work: scope and findings
 
-The next verification round kept the existing solver, replay validator, API contract, provider adapter, dependency pins and all previous tests. The offline baseline was 291 passed / 11 live tests skipped. New coverage includes 1,000 fixed-seed feasible numeric scenarios, 35 overlapping directive combinations, 10 named independent optimality checks, 24 decimal-scaled oracle checks, systematic API fuzzing, and concurrent failure recovery. The complete offline suite now passes **1,539 tests**, with 11 explicitly opted-out live tests and one upstream Starlette/AnyIO deprecation warning.
+That verification round kept the existing solver, replay validator, API contract, provider adapter, dependency pins and all previous tests. The offline baseline was 291 passed / 11 live tests skipped. New coverage included 1,000 fixed-seed feasible numeric scenarios, 35 overlapping directive combinations, 10 named independent optimality checks, 24 decimal-scaled oracle checks, systematic API fuzzing, and concurrent failure recovery. At the end of that round, the offline suite passed **1,539 tests**, with 11 explicitly opted-out live tests and one upstream Starlette/AnyIO deprecation warning. The current count is recorded above.
 
 The independently authored semantic dataset is `tests/data/semantic_hidden_style_cases.json`: **150 notes, 50 three-note requests, 25 notes per category**. It has 24 requests tagged for time boundaries, 10 adversarial requests (30 notes), and two requests with long irrelevant context. Production never reads the dataset.
 
@@ -34,7 +43,7 @@ These live runs pause ten seconds between requests, excluded from latency. Produ
 | Randomized optimizer | 1,000/1,000 feasible seeded witnesses and optimized schedules replay; no failures |
 | New independent optimality checks | 35 directive combinations + 10 named scenarios + 24 decimal-scaled scenarios; all match the integer-state oracle |
 | API fuzz | 102 field mutations + 7 malformed JSON/encoding inputs; controlled 400s, no model/solver calls |
-| Final offline suite | 1,539 passed, 11 live skips, one upstream warning |
+| Final offline suite | 1,592 passed, 12 live skips, one upstream warning |
 | Static/dependency checks | Ruff, compileall and pip check pass |
 
 ### Clean-room, container and repository verification
@@ -43,7 +52,7 @@ A fresh source snapshot was created under ignored `.artifacts/clean-room`, witho
 
 A clean-room uvicorn process then received configuration through named environment variables and served exact `/health` plus an official `/optimize-energy` request: valid interpretation, valid replay and exact optimum, 3.785 seconds. `PYTHONPATH` was removed from the child environment; the service used its own new virtualenv and relocated source. No secret was written to its `.env`. Captured startup/shutdown logs were checked for the real key and stack traces. The initial shutdown assertion expected zero; inspection of the pinned Uvicorn implementation showed it intentionally re-raises SIGTERM after lifespan shutdown. The corrected check requires the shutdown-complete log and allows normal signal termination (`-15` for the child process). This was a verification-harness correction, not an application crash.
 
-The final image was rebuilt using `docker build --no-cache -t gridwise:latest .`. Local image ID: `sha256:470cd3c23ed583f7bc7311a8ae85b20561fbf728aed9ebbe3b56f88d961095d4`, size 116,703,306 bytes. It binds to `0.0.0.0:8000`, runs as `gridwise`, and includes no `.env`, tests, organizer data or baked `LLM_API_KEY`. A separate Docker healthcheck/shutdown audit became healthy in 5.76 seconds and stopped gracefully with exit code 0 and secret-free logs. The application archive, image configuration and image history were checked against the actual local key. The image remains local; this ID is not a published registry reference.
+The final image was rebuilt using `docker build --no-cache -t gridwise:latest .`. Local image ID: `sha256:470cd3c23ed583f7bc7311a8ae85b20561fbf728aed9ebbe3b56f88d961095d4`, size 116,703,306 bytes. It binds to `0.0.0.0:8000`, runs as `gridwise`, and includes no `.env`, tests, organizer data or baked `LLM_API_KEY`. A separate Docker healthcheck/shutdown audit became healthy in 5.76 seconds and stopped gracefully with exit code 0 and secret-free logs. The application archive, image configuration and image history were checked against the actual local key. This artifact was subsequently published to GHCR under the digest recorded in the current submission state.
 
 Repository scans cover candidate source files, staged/unstaged diffs, all Git history, and generated verification reports using the actual local key plus obvious credential patterns. `.env` remains ignored and untracked; `.env.example` is the only tracked environment file. The existing GitHub repository remains private. Organizer originals remain ignored in `data/`; README explains restoration and tests never silently count absent public data as passed.
 
@@ -114,7 +123,7 @@ Latency includes provider calls, parsing/validation, optimizer, and replay; it e
 
 One upstream Starlette/AnyIO deprecation warning remains. Normal pytest does not require provider access. The real-provider measurements above came from the explicit scripts rather than a duplicate quota-consuming live pytest run.
 
-Local image: `gridwise:latest`, ID `sha256:508bd3ae70e7a07eee8dedbfebba9eddac97e20e9ff6ad65118cf3a115d5e6be`. Docker smoke passes the key via runtime environment names, never command arguments containing its value. The Docker context excludes `.env`, tests, organizer data, and Git. The image has not been pushed to a registry; this local ID is not a pullable submission reference.
+At that earlier checkpoint, the local image was `gridwise:latest`, ID `sha256:508bd3ae70e7a07eee8dedbfebba9eddac97e20e9ff6ad65118cf3a115d5e6be`. Docker smoke passed the key via runtime environment names, never command arguments containing its value. The Docker context excluded `.env`, tests, organizer data, and Git. That historical local ID was not a pullable registry digest; use the current GHCR digest above.
 
 ## Reproduce
 
@@ -136,4 +145,4 @@ Restore the organizer JSON to ignored `data/` and configure the local key as des
 
 ## Remaining risks
 
-Provider quota under concurrent judge requests is the largest operational risk. Longer notes can consume more tokens and truncated output will fail safely after a bounded repair. Strong prompts and guardrails do not prove semantic immunity to all adversarial wording. Overnight/day-boundary phrasing and overlapping solar-reduction precedence remain organizer ambiguities. Public deployment, registry publication, external reachability verification, and the required video remain later submission work.
+Provider quota under concurrent judge requests is the largest operational risk. Longer notes can consume more tokens and truncated output will fail safely after a bounded repair. Strong prompts and guardrails do not prove semantic immunity to all adversarial wording. Overnight/day-boundary phrasing and overlapping solar-reduction precedence remain organizer ambiguities. The remaining submission actions are publishing the video URL, making the GHCR package pullable for evaluators, and changing source visibility only after the official deadline.

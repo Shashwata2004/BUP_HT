@@ -18,11 +18,11 @@ SciPy HiGHS solves the schedule as a linear program. It minimizes tariff-weighte
 
 **1:40–2:15 — Evidence**
 
-The offline suite has 1,539 passing tests. All ten official optimizer cases match the organizer's optimum exactly, and all ten pass through the live Groq path. A separate 150-note paraphrase suite passes completely. We also replayed 1,000 deterministic randomized scenarios, checked independent optimality oracles, fuzzed invalid API requests, and tested 100 concurrent calls. Secrets remain outside source control and the container image.
+The offline suite has 1,592 passing tests. All ten official optimizer cases match the organizer's optimum exactly, and all ten pass through the live Groq path. A separate 150-note hidden-style suite and a final 54-note semantic red team both pass completely. We also replayed 1,000 deterministic randomized scenarios, checked independent optimality oracles, fuzzed invalid API requests, and tested 100 concurrent calls. Secrets remain outside source control and the container image.
 
 **2:15–2:40 — Submission paths**
 
-The public Koyeb endpoint exposes `GET /health` and `POST /optimize-energy` over HTTPS without judge authentication. The same application is published as a versioned GHCR image for fallback reproduction. The README provides local setup, exact environment-variable names, test commands, API examples, and Docker commands. This gives judges the same LLM-to-guardrail-to-optimizer-to-validator pipeline through either deployment path.
+The public Render endpoint exposes `GET /health` and `POST /optimize-energy` over HTTPS without judge authentication. The same application is published as a digest-pinned GHCR image for fallback reproduction. The README provides local setup, exact environment-variable names, test commands, API examples, and Docker commands. This gives judges the same LLM-to-guardrail-to-optimizer-to-validator pipeline through either deployment path.
 
 ## Screen-recording shot order
 
@@ -31,4 +31,4 @@ The public Koyeb endpoint exposes `GET /health` and `POST /optimize-energy` over
 3. Show `app/optimizer.py` and `app/validator.py` side by side.
 4. Run or show the final `pytest` result and the 10/10 public-case result.
 5. Call the public `/health`, then show one successful `/optimize-energy` response.
-6. Show the Koyeb service URL and the GHCR image reference/digest from `docs/submission-info.md`.
+6. Show the Render service URL and the GHCR image reference/digest from `docs/submission-info.md`.
