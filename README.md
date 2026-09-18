@@ -2,6 +2,10 @@
 
 A Python 3.12 backend for the 24-hour campus energy challenge. It interprets all operator notes with a language model, validates their structured directives, and minimizes grid electricity cost with a deterministic linear program. No frontend, authentication, or sample-specific production logic is present.
 
+```text
+operator notes -> Groq LLM -> deterministic guardrails -> HiGHS optimizer -> final replay validator
+```
+
 ## Organizer files (kept locally)
 
 `data/` is ignored by Git. The organizer PDFs and public sample JSON are supplied separately and are not included in new clones. Neither PDF explicitly requires committing those original files. The guide does require reproducible public-sample testing, so restore the JSON before running the public-case commands below. Run these commands from the repository root after cloning:
@@ -112,7 +116,7 @@ Groq is the primary provider and the defaults select its production `openai/gpt-
 | `LLM_REASONING_EFFORT` | `low` for GPT-OSS latency; also accepts `medium`, `high`, or `omit` for providers without this field. |
 | `RUN_LIVE_LLM` | Test-only explicit opt-in (`1`) to enable live pytest cases. Normal pytest never calls a paid model. |
 
-Docker also sets `OPENBLAS_NUM_THREADS=1`, `OMP_NUM_THREADS=1`, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONUNBUFFERED=1`, and `PIP_NO_CACHE_DIR=1` as runtime/build defaults. No additional application configuration is required. The service port is 8000; use Docker port mapping or uvicorn's `--port` to change the external port.
+Docker also sets `OPENBLAS_NUM_THREADS=1`, `OMP_NUM_THREADS=1`, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONUNBUFFERED=1`, and `PIP_NO_CACHE_DIR=1` as runtime/build defaults. No additional application configuration is required. The container uses a platform-supplied `PORT` and otherwise listens on 8000; use Docker port mapping or uvicorn's `--port` to change the external port.
 
 The Groq configuration uses strict JSON-schema output. The per-request schema fixes the exact note count and valid note-index range. Deterministic normalization converts Groq's uniform nullable adjustment slots into the exact official discriminated representation, then Pydantic validates every cross-field semantic rule, numeric bound, and capacity limit. Strict schema support was verified with real calls; the provider initially rejected both overlapping-union formulations. The [Groq structured-output documentation](https://console.groq.com/docs/structured-outputs) and [reasoning controls](https://console.groq.com/docs/reasoning) describe the chosen API features. The linear solver is [SciPy's HiGHS interface](https://docs.scipy.org/doc/scipy/reference/optimize.linprog-highs.html); models use [Pydantic strict validation](https://pydantic.dev/docs/validation/latest/concepts/strict_mode/).
 
@@ -203,7 +207,7 @@ docker pull REGISTRY/OWNER/gridwise@sha256:ACTUAL_DIGEST
 docker run --rm -p 8000:8000 --env-file .env REGISTRY/OWNER/gridwise@sha256:ACTUAL_DIGEST
 ```
 
-These placeholder pull commands are a submission template, not a claim that a registry artifact exists. Keep the final image pullable throughout evaluation and verify the hosted API from outside the development network.
+The submission fallback image is `ghcr.io/shashwata2004/bup_ht:bup-preli-2026`. Its exact pushed digest and the public Koyeb endpoint are recorded in [submission information](docs/submission-info.md). Keep the image pullable throughout evaluation and verify the hosted API from outside the development network.
 
 ## Reproducibility, security, and limitations
 
