@@ -1,5 +1,7 @@
 # Baseline verification record
 
+This is the historical first-phase record. See [live verification](live-verification.md) for the current Groq hardening, real-provider results, and updated Docker artifact.
+
 Run locally on 2026-09-18 with Python 3.12.3 and Docker Engine 29.2.1. This records observed results, not a hidden-judge score or live-provider performance claim.
 
 | Check | Observed result |
@@ -46,7 +48,7 @@ Reported local image size: 116,700,640 bytes. Runs as user `gridwise`, exposes p
 
 ## Explicitly unverified / remaining submission work
 
-- No `LLM_API_KEY` or `LLM_MODEL` is configured. Real provider compatibility, note accuracy/paraphrases, quota, and end-to-end p95 have not been measured. Run the documented live tests after configuring these.
+- At this baseline no provider was configured. This item is superseded by the later [live verification](live-verification.md).
 - No public deployment, external-network endpoint check, or pullable registry image is provided in this phase.
 - The required ≤3-minute submission video is not created.
 - Overlapping solar-reduction precedence needs organizer clarification; the implemented literal assignment assumption is documented in acceptance criteria.

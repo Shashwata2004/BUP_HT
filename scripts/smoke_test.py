@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise real local sockets and the full HTTP adapter with a mock provider; no paid API."""
+"""Exercise local/Docker sockets; mock by default, one real call only with --live."""
 
 import argparse
 import concurrent.futures
@@ -17,6 +17,7 @@ import httpx
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from app.config import Settings  # noqa: E402
 from app.models import OptimizationResponse, Scenario  # noqa: E402
 from app.validator import validate_plan  # noqa: E402
 
@@ -51,7 +52,10 @@ def wait_ready(url: str, processes: list[subprocess.Popen]) -> None:
     raise RuntimeError("smoke-test readiness timeout")
 
 
-def run(image: str | None) -> None:
+def run(image: str | None, live: bool = False) -> None:
+    configuration = Settings.from_env() if live else None
+    if configuration is not None and not configuration.configured:
+        raise RuntimeError("Live smoke requires LLM_API_KEY in the environment or ignored .env")
     provider_port, api_port = free_port(), free_port()
     scenario = Scenario.model_validate(
         {
@@ -76,24 +80,45 @@ def run(image: str | None) -> None:
         }
     )
     with ExitStack() as stack:
-        provider = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "uvicorn",
-                "tests.mock_provider:app",
-                "--host",
-                "0.0.0.0",
-                "--port",
-                str(provider_port),
-                "--no-access-log",
-                "--log-level",
-                "error",
-            ],
-            cwd=ROOT,
-        )
-        stack.callback(stop, provider)
-        wait_ready(f"http://127.0.0.1:{provider_port}/openapi.json", [provider])
+        processes = []
+        # Use only explicitly resolved app settings. Docker receives values via its child
+        # environment, never secret-bearing command arguments or image layers.
+        if configuration is not None:
+            service_env = {
+                name.upper(): str(value)
+                for name, value in configuration.model_dump().items()
+                if name != "llm_api_key" and value is not None
+            }
+            service_env["LLM_API_KEY"] = configuration.llm_api_key.get_secret_value()
+            if configuration.llm_temperature is None:
+                service_env["LLM_TEMPERATURE"] = "omit"
+        else:
+            provider = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "uvicorn",
+                    "tests.mock_provider:app",
+                    "--host",
+                    "0.0.0.0",
+                    "--port",
+                    str(provider_port),
+                    "--no-access-log",
+                    "--log-level",
+                    "error",
+                ],
+                cwd=ROOT,
+            )
+            stack.callback(stop, provider)
+            processes.append(provider)
+            wait_ready(f"http://127.0.0.1:{provider_port}/openapi.json", processes)
+            provider_host = "host.docker.internal" if image else "127.0.0.1"
+            service_env = {
+                "LLM_API_KEY": "smoke-placeholder",
+                "LLM_MODEL": "smoke-mock",
+                "LLM_BASE_URL": f"http://{provider_host}:{provider_port}/v1",
+            }
+        child_env = {**os.environ, **service_env}
         if image:
             name = f"gridwise-smoke-{os.getpid()}"
             subprocess.run(
@@ -108,28 +133,17 @@ def run(image: str | None) -> None:
                     "host.docker.internal:host-gateway",
                     "-p",
                     f"127.0.0.1:{api_port}:8000",
-                    "-e",
-                    "LLM_API_KEY=smoke-placeholder",
-                    "-e",
-                    "LLM_MODEL=smoke-mock",
-                    "-e",
-                    f"LLM_BASE_URL=http://host.docker.internal:{provider_port}/v1",
+                    *(argument for name in service_env for argument in ("-e", name)),
                     image,
                 ],
                 check=True,
                 stdout=subprocess.DEVNULL,
+                env=child_env,
             )
             stack.callback(
                 subprocess.run, ["docker", "stop", name], stdout=subprocess.DEVNULL, check=False
             )
-            processes = [provider]
         else:
-            env = dict(
-                os.environ,
-                LLM_API_KEY="smoke-placeholder",
-                LLM_MODEL="smoke-mock",
-                LLM_BASE_URL=f"http://127.0.0.1:{provider_port}/v1",
-            )
             server = subprocess.Popen(
                 [
                     sys.executable,
@@ -145,10 +159,10 @@ def run(image: str | None) -> None:
                     "error",
                 ],
                 cwd=ROOT,
-                env=env,
+                env=child_env,
             )
             stack.callback(stop, server)
-            processes = [provider, server]
+            processes.append(server)
         base = f"http://127.0.0.1:{api_port}"
         wait_ready(base + "/health", processes)
         with httpx.Client(trust_env=False, timeout=30) as client:
@@ -164,7 +178,7 @@ def run(image: str | None) -> None:
                 return time.perf_counter() - start
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-                times = list(pool.map(request_one, range(24)))
+                times = list(pool.map(request_one, range(1 if live else 24)))
             print(
                 json.dumps(
                     {
@@ -172,7 +186,9 @@ def run(image: str | None) -> None:
                         "health": "ok",
                         "valid_posts": len(times),
                         "max_seconds": round(max(times), 4),
-                        "provider": "mock; language accuracy NOT tested",
+                        "provider": "live configured LLM"
+                        if live
+                        else "mock; language accuracy NOT tested",
                     }
                 )
             )
@@ -181,4 +197,10 @@ def run(image: str | None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--docker-image", help="test this local Docker image instead of local API")
-    run(parser.parse_args().docker_image)
+    parser.add_argument("--live", action="store_true", help="make one real LLM call (uses quota)")
+    args = parser.parse_args()
+    try:
+        run(args.docker_image, args.live)
+    except Exception as exc:
+        print(f"Smoke failed: {type(exc).__name__}; check configuration and service availability.")
+        raise SystemExit(1) from None

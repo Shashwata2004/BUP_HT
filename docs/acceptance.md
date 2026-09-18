@@ -57,4 +57,4 @@ Overlapping solar reductions have no stated combination/precedence rule. Current
 
 ## Test boundaries
 
-Offline expected-directive tests validate mathematics independently of language quality. Mock HTTP tests validate integration and failure handling. Only a configured live LLM run establishes actual note interpretation accuracy and real request latency. No provider credential/model is currently configured.
+Offline expected-directive tests validate mathematics independently of language quality. Mock HTTP tests validate integration and failure handling. Live Groq tests now establish measured accuracy and latency for the public and synthetic suites; see [live verification](live-verification.md). They do not prove hidden-case accuracy or provider availability under judge concurrency.

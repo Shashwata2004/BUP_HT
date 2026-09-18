@@ -41,6 +41,8 @@ def test_live_public_cases(case):
         pytest.skip("LLM_API_KEY and LLM_MODEL must be configured")
 
     async def run():
+        # Match the benchmark's free-tier pacing, including across pytest test boundaries.
+        await asyncio.sleep(7.5)
         scenario = Scenario.model_validate(case["input"])
         async with httpx.AsyncClient(trust_env=False) as client:
             directives = await LLMInterpreter(settings, client).interpret(scenario)

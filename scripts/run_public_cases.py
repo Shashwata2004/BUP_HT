@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import json
 import math
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -16,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 
 from app.config import Settings  # noqa: E402
 from app.guardrails import validate_directives  # noqa: E402
-from app.interpreter import LLMInterpreter  # noqa: E402
+from app.interpreter import InterpretationMetrics, LLMInterpreter  # noqa: E402
 from app.models import OptimizationResponse, Scenario  # noqa: E402
 from app.optimizer import optimize  # noqa: E402
 from app.validator import validate_plan  # noqa: E402
@@ -72,14 +73,31 @@ async def run(args: argparse.Namespace) -> int:
             "as described in README.md."
         )
         return 2
-    settings = Settings.from_env() if args.live else None
+    if not math.isfinite(args.pace_seconds) or not 0 <= args.pace_seconds <= 60:
+        print("--pace-seconds must be finite and between 0 and 60.")
+        return 2
+    try:
+        settings = Settings.from_env() if args.live else None
+    except ValueError:
+        print("Invalid LLM configuration; check environment variable names and types.")
+        return 2
     if settings is not None and not settings.configured:
         print("Live mode requires LLM_API_KEY and LLM_MODEL (environment or .env).")
         return 2
     passed = 0
     latencies = []
+    attempted = 0
+    total_metrics = InterpretationMetrics()
+    cases = load_cases()
+    if args.case:
+        cases = [case for case in cases if case["id"] in args.case]
+        if len(cases) != len(args.case):
+            print("Unknown or duplicate --case value.")
+            return 2
     async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
-        for case in load_cases():
+        for position, case in enumerate(cases):
+            attempted += 1
+            metrics = InterpretationMetrics()
             start = time.perf_counter()
             try:
                 scenario = Scenario.model_validate(case["input"])
@@ -94,7 +112,7 @@ async def run(args: argparse.Namespace) -> int:
                     )
                     response = optimize(scenario, directives)
                 elif args.live:
-                    directives = await LLMInterpreter(settings, client).interpret(scenario)
+                    directives = await LLMInterpreter(settings, client).interpret(scenario, metrics)
                     response = optimize(scenario, directives)
                 else:
                     result = await client.post(
@@ -104,20 +122,55 @@ async def run(args: argparse.Namespace) -> int:
                     response = OptimizationResponse.model_validate(result.json())
                 delta = verify_case(case, response)
                 elapsed = time.perf_counter() - start
-                latencies.append(elapsed)
                 print(
                     f"PASS {case['id']}: cost={response.total_cost_bdt:.6f} "
-                    f"delta={delta:+.8f} BDT elapsed={elapsed:.3f}s"
+                    f"delta={delta:+.8f} BDT elapsed={elapsed:.3f}s",
+                    flush=True,
                 )
                 passed += 1
             except Exception as exc:
                 # Safe type only: provider URLs/bodies may contain credentials.
                 print(f"FAIL {case['id']}: {type(exc).__name__}")
-    print(f"{passed}/10 passed")
+            finally:
+                latencies.append(time.perf_counter() - start)
+                if args.live:
+                    for field in vars(total_metrics):
+                        value = getattr(total_metrics, field) + getattr(metrics, field)
+                        setattr(total_metrics, field, value)
+            if (
+                metrics.client_failures
+                or metrics.rate_limit_failures
+                or metrics.server_failures
+                or metrics.transport_failures
+            ):
+                print("Provider failed; remaining cases were not attempted.")
+                break
+            if not args.offline and position + 1 < len(cases) and args.pace_seconds:
+                await asyncio.sleep(args.pace_seconds)
+    print(f"{passed}/{len(cases)} passed")
+    if attempted != len(cases):
+        print(f"{len(cases) - attempted} cases not attempted")
     if latencies:
         p95 = sorted(latencies)[math.ceil(0.95 * len(latencies)) - 1]
-        print(f"Observed p95 over {len(latencies)} successful cases: {p95:.3f}s")
-    return 0 if passed == 10 else 1
+        print(
+            f"Latency over {len(latencies)} attempted cases: "
+            f"p50={statistics.median(latencies):.3f}s p95={p95:.3f}s "
+            f"max={max(latencies):.3f}s"
+        )
+    if args.live:
+        print(
+            f"Provider calls={total_metrics.provider_calls} "
+            f"transient retries={total_metrics.transient_retries} "
+            f"validation repairs={total_metrics.validation_repairs} "
+            f"invalid outputs={total_metrics.invalid_outputs} "
+            f"prompt tokens={total_metrics.prompt_tokens} "
+            f"completion tokens={total_metrics.completion_tokens} "
+            f"rate-limit failures={total_metrics.rate_limit_failures} "
+            f"server failures={total_metrics.server_failures} "
+            f"client failures={total_metrics.client_failures} "
+            f"transport failures={total_metrics.transport_failures}"
+        )
+    return 0 if passed == len(cases) else 1
 
 
 if __name__ == "__main__":
@@ -125,6 +178,13 @@ if __name__ == "__main__":
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--offline", action="store_true", help="use official expected directives")
     modes.add_argument("--live", action="store_true", help="call configured LLM directly")
+    parser.add_argument("--case", action="append", help="run only this case ID; repeat as needed")
+    parser.add_argument(
+        "--pace-seconds",
+        type=float,
+        default=7.5,
+        help="delay between direct live calls for Groq free-tier token limits (default: 7.5)",
+    )
     parser.add_argument(
         "--url", default="http://127.0.0.1:8000", help="API base URL (default mode)"
     )

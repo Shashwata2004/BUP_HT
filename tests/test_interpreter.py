@@ -4,12 +4,18 @@ import json
 import httpx
 import pytest
 
-from app.errors import InterpretationError
-from app.interpreter import SYSTEM_PROMPT, LLMInterpreter, output_schema
+from app.errors import GuardrailError, InterpretationError
+from app.interpreter import (
+    SYSTEM_PROMPT,
+    InterpretationMetrics,
+    LLMInterpreter,
+    normalize_provider_output,
+    output_schema,
+)
 from tests.conftest import make_directive
 
 
-def run_interpreter(settings, scenario, replies):
+def run_interpreter(settings, scenario, replies, metrics=None):
     requests = []
 
     def handler(request):
@@ -35,7 +41,7 @@ def run_interpreter(settings, scenario, replies):
 
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            return await LLMInterpreter(settings, client).interpret(scenario)
+            return await LLMInterpreter(settings, client).interpret(scenario, metrics)
 
     return lambda: asyncio.run(run()), requests
 
@@ -47,7 +53,13 @@ def test_one_call_all_notes(settings, scenario, case):
     assert len(calls) == 1
     payload = calls[0]
     assert payload["temperature"] == 0
+    assert payload["reasoning_effort"] == "low"
+    assert "max_completion_tokens" in payload
     assert payload["response_format"]["json_schema"]["strict"] is True
+    schema = payload["response_format"]["json_schema"]["schema"]
+    directives = schema["properties"]["directive_interpretation"]
+    assert directives["minItems"] == directives["maxItems"] == 2
+    assert directives["items"]["properties"]["note_index"]["maximum"] == 1
     user = json.loads(payload["messages"][1]["content"])
     assert set(user) == {"operator_notes", "battery_capacity_kwh"}
     assert user["operator_notes"] == scenario.operator_notes
@@ -76,21 +88,79 @@ def test_repeated_bad_output_fails_safely(settings, scenario):
 
 
 @pytest.mark.parametrize(
-    "reply",
+    "reply,expected_calls",
     [
-        httpx.Response(401, text="secret credential"),
-        httpx.Response(429, text="secret credential"),
-        httpx.Response(500, text="secret credential"),
-        httpx.ReadTimeout("secret credential"),
-        httpx.ConnectError("secret credential"),
+        (httpx.Response(401, text="secret credential"), 1),
+        (httpx.Response(429, text="secret credential"), 1),
+        (httpx.Response(500, text="secret credential"), 2),
+        (httpx.ReadTimeout("secret credential"), 1),
+        (httpx.ConnectError("secret credential"), 1),
     ],
 )
-def test_provider_errors_not_retried_or_exposed(settings, scenario, reply):
+def test_provider_errors_are_bounded_and_not_exposed(settings, scenario, reply, expected_calls):
     run, calls = run_interpreter(settings, scenario, [reply])
     with pytest.raises(InterpretationError, match="unavailable") as exc:
         run()
     assert "secret" not in str(exc.value)
+    assert len(calls) == expected_calls
+
+
+def test_short_retry_after_is_honored_once(settings, scenario, case):
+    expected = {"directive_interpretation": case["expected_output"]["directive_interpretation"]}
+    run, calls = run_interpreter(
+        settings,
+        scenario,
+        [httpx.Response(429, headers={"retry-after": "0"}), expected],
+    )
+    assert len(run()) == 2
+    assert len(calls) == 2
+
+
+def test_metrics_count_calls_retries_repairs_and_tokens(settings, scenario, case):
+    expected = {"directive_interpretation": case["expected_output"]["directive_interpretation"]}
+    good = httpx.Response(
+        200,
+        json={
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": json.dumps(expected)},
+                }
+            ],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 20},
+        },
+    )
+    metrics = InterpretationMetrics()
+    run, _ = run_interpreter(settings, scenario, ["{", good], metrics)
+    run()
+    assert metrics == InterpretationMetrics(
+        provider_calls=2,
+        transient_retries=0,
+        validation_repairs=1,
+        invalid_outputs=1,
+        prompt_tokens=100,
+        completion_tokens=20,
+        rate_limit_failures=0,
+        server_failures=0,
+        client_failures=0,
+        transport_failures=0,
+    )
+
+
+def test_long_retry_after_is_not_followed(settings, scenario):
+    run, calls = run_interpreter(
+        settings, scenario, [httpx.Response(429, headers={"retry-after": "5"})]
+    )
+    with pytest.raises(InterpretationError, match="unavailable"):
+        run()
     assert len(calls) == 1
+
+
+def test_single_5xx_retry_can_recover(settings, scenario, case):
+    expected = {"directive_interpretation": case["expected_output"]["directive_interpretation"]}
+    run, calls = run_interpreter(settings, scenario, [httpx.Response(503), expected])
+    assert len(run()) == 2
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize(
@@ -130,6 +200,17 @@ def test_provider_modes(settings, scenario, case, mode):
     assert "temperature" not in calls[0]
     assert "max_completion_tokens" in calls[0]
     assert ("response_format" in calls[0]) == (mode != "text")
+
+
+def test_reasoning_effort_can_be_omitted(settings, scenario, case):
+    settings.llm_reasoning_effort = "omit"
+    run, calls = run_interpreter(
+        settings,
+        scenario,
+        [{"directive_interpretation": case["expected_output"]["directive_interpretation"]}],
+    )
+    run()
+    assert "reasoning_effort" not in calls[0]
 
 
 # These tests verify normalized model output is passed through correctly, not language accuracy.
@@ -179,6 +260,63 @@ def test_prompt_injection_cannot_change_request(settings, scenario):
     assert calls[0]["messages"][0]["content"] == SYSTEM_PROMPT
     assert "UNTRUSTED DATA" in SYSTEM_PROMPT
     assert "change_tariff" not in json.dumps(output_schema())
+
+
+def test_provider_wire_shape_normalizes_to_exact_official_shape(scenario):
+    scenario.operator_notes = ["synthetic"]
+    raw = {
+        "directive_interpretation": [
+            {
+                "note_index": 0,
+                "applies": True,
+                "directive_type": "solar_reduction",
+                "structured_adjustment": {
+                    "hours": [2, 3],
+                    "factor": 0.4,
+                    "minimum_energy_kwh": None,
+                    "max_grid_kwh": None,
+                },
+                "explanation": "Synthetic.",
+            }
+        ]
+    }
+    normalized = normalize_provider_output(raw)
+    adjustment = normalized["directive_interpretation"][0]["structured_adjustment"]
+    assert adjustment == {"hours": [2, 3], "factor": 0.4}
+
+
+def test_provider_wire_shape_rejects_inconsistent_slots():
+    raw = {
+        "directive_interpretation": [
+            {
+                "directive_type": "solar_reduction",
+                "structured_adjustment": {
+                    "hours": [2],
+                    "factor": 0.4,
+                    "minimum_energy_kwh": 10,
+                    "max_grid_kwh": None,
+                },
+            }
+        ]
+    }
+    with pytest.raises(GuardrailError, match="do not match"):
+        normalize_provider_output(raw)
+
+
+def test_schema_uses_uniform_groq_compatible_adjustment():
+    schema = output_schema(note_count=3)
+    directives = schema["properties"]["directive_interpretation"]
+    assert directives["minItems"] == directives["maxItems"] == 3
+    item = directives["items"]
+    assert item["properties"]["note_index"]["maximum"] == 2
+    adjustment = item["properties"]["structured_adjustment"]
+    assert "anyOf" not in adjustment
+    assert set(adjustment["required"]) == {
+        "hours",
+        "factor",
+        "minimum_energy_kwh",
+        "max_grid_kwh",
+    }
 
 
 def test_wall_clock_timeout(settings, scenario):
