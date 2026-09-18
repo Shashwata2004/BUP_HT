@@ -43,6 +43,8 @@ def test_benchmark_counts_individual_semantics_even_if_replay_fails(monkeypatch,
     assert result["type_accuracy_percent"] == 100
     assert result["time_window_accuracy_percent"] == 100
     assert result["numeric_accuracy_percent"] == 66.67
+    assert len(result["semantic_mismatches"]) == 1
+    assert "explanation" not in result["semantic_mismatches"][0]["actual"]
 
 
 def test_benchmark_reports_one_retry_request_for_two_retry_reasons(monkeypatch, settings):

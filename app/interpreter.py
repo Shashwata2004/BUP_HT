@@ -36,9 +36,14 @@ Hours are unique sorted integers 0..23. Windows are start-inclusive and end-excl
 wraps through 0 and is returned sorted. Never output 24. A single stated whole hour covers it.
 
 Solar wording: "20% of forecast" or "reduced to 20%" -> 0.20; "reduced by 20%" -> 0.80;
-"80% reduction" -> 0.20; "half remains" -> 0.50. Reserve applies to battery energy after each
+"80% reduction" -> 0.20; "half remains" -> 0.50. Complete solar unavailability is factor=0,
+even without a numeric percentage. Explicit full forecast availability is factor=1.
+Reserve applies to battery energy after each
 listed hour and cannot exceed capacity.
 
+Determine the note's day BEFORE extracting constraints. An explicitly future or historical
+restriction is no_op unless it also explicitly applies today. A precise clock window does not
+override the stated day: tomorrow's grid, solar or battery restriction is not today's restriction.
 Anything that does not change today's supported energy constraints is no_op, including generic
 campus announcements, future events, menus, registrations, room bookings, and club notices even
 when they contain numbers or times. Each applicable scoring note represents one supported type.

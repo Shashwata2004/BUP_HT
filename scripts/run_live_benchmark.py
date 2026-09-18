@@ -81,10 +81,11 @@ async def benchmark(
     settings: Settings,
     pace_seconds: float = 7.5,
     request_ids: set[str] | None = None,
+    suite_path: Path | None = None,
 ) -> tuple[dict, bool]:
     if not math.isfinite(pace_seconds) or not 0 <= pace_seconds <= 60:
         raise ValueError("pace_seconds must be finite and between 0 and 60")
-    suite = load_suite()
+    suite = json.loads(suite_path.read_text()) if suite_path else load_suite()
     requests = suite["requests"]
     if request_ids:
         requests = [item for item in requests if item["id"] in request_ids]
@@ -95,6 +96,7 @@ async def benchmark(
     latencies: list[float] = []
     total_metrics = InterpretationMetrics()
     failures: list[str] = []
+    semantic_mismatches: list[dict] = []
     retry_requests = 0
     async with httpx.AsyncClient(follow_redirects=False, trust_env=False) as client:
         interpreter = LLMInterpreter(settings, client)
@@ -151,6 +153,17 @@ async def benchmark(
                 if type_ok and hours_ok and number_ok:
                     correct[kind] += 1
                     correct["total"] += 1
+                else:
+                    # Only validated enum/index/numeric fields; never copy note text,
+                    # explanations, raw provider bodies or credentials into reports.
+                    semantic_mismatches.append(
+                        {
+                            "request_id": item["id"],
+                            "note_index": index,
+                            "expected": {k: v for k, v in expected.items() if k != "explanation"},
+                            "actual": {k: v for k, v in observed.items() if k != "explanation"},
+                        }
+                    )
             print(
                 f"{item['id']}: elapsed={latency:.3f}s calls={metrics.provider_calls} "
                 f"repairs={metrics.validation_repairs}",
@@ -224,6 +237,7 @@ async def benchmark(
         "client_failures": total_metrics.client_failures,
         "transport_failures": total_metrics.transport_failures,
         "failures": failures,
+        "semantic_mismatches": semantic_mismatches,
     }
     passed = (
         len(latencies) == len(requests) and correct["total"] == counts["total"] and not failures
@@ -241,7 +255,7 @@ async def main(args: argparse.Namespace) -> int:
         print("Live benchmark requires LLM_API_KEY (environment or ignored .env).")
         return 2
     try:
-        result, passed = await benchmark(settings, args.pace_seconds, set(args.request))
+        result, passed = await benchmark(settings, args.pace_seconds, set(args.request), args.suite)
     except ValueError:
         print("Invalid request selection or pacing; use --help.")
         return 2
@@ -252,6 +266,7 @@ async def main(args: argparse.Namespace) -> int:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--request", action="append", default=[], help="run one request ID")
+    parser.add_argument("--suite", type=Path, help="alternate independently authored JSON suite")
     parser.add_argument(
         "--pace-seconds",
         type=float,

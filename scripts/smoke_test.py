@@ -4,8 +4,10 @@
 import argparse
 import concurrent.futures
 import json
+import math
 import os
 import socket
+import statistics
 import subprocess
 import sys
 import time
@@ -52,7 +54,12 @@ def wait_ready(url: str, processes: list[subprocess.Popen]) -> None:
     raise RuntimeError("smoke-test readiness timeout")
 
 
-def run(image: str | None, live: bool = False) -> None:
+def run(
+    image: str | None, live: bool = False, requests: int | None = None, workers: int = 8
+) -> None:
+    count = requests if requests is not None else (1 if live else 24)
+    if not 1 <= count <= (3 if live else 100) or not 1 <= workers <= 16:
+        raise ValueError("use 1..100 mock requests or 1..3 live requests, and 1..16 workers")
     configuration = Settings.from_env() if live else None
     if configuration is not None and not configuration.configured:
         raise RuntimeError("Live smoke requires LLM_API_KEY in the environment or ignored .env")
@@ -168,23 +175,27 @@ def run(image: str | None, live: bool = False) -> None:
         with httpx.Client(trust_env=False, timeout=30) as client:
             assert client.get(base + "/health").json() == {"status": "ok"}
 
-            def request_one(_):
+            def request_one(index):
+                current = scenario.model_copy(update={"scenario_id": f"socket-smoke-{index}"})
                 start = time.perf_counter()
-                result = client.post(base + "/optimize-energy", json=scenario.model_dump())
+                result = client.post(base + "/optimize-energy", json=current.model_dump())
                 result.raise_for_status()
                 response = OptimizationResponse.model_validate(result.json())
-                validate_plan(scenario, response)
+                validate_plan(current, response)
                 assert response.directive_interpretation[0].directive_type == "no_op"
                 return time.perf_counter() - start
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-                times = list(pool.map(request_one, range(1 if live else 24)))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                times = list(pool.map(request_one, range(count)))
             print(
                 json.dumps(
                     {
                         "mode": "docker" if image else "local",
                         "health": "ok",
                         "valid_posts": len(times),
+                        "workers": workers,
+                        "p50_seconds": round(statistics.median(times), 4),
+                        "p95_seconds": round(sorted(times)[math.ceil(0.95 * len(times)) - 1], 4),
                         "max_seconds": round(max(times), 4),
                         "provider": "live configured LLM"
                         if live
@@ -198,9 +209,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--docker-image", help="test this local Docker image instead of local API")
     parser.add_argument("--live", action="store_true", help="make one real LLM call (uses quota)")
+    parser.add_argument("--requests", type=int, help="mock: 1..100; live: 1..3 (uses quota)")
+    parser.add_argument("--workers", type=int, default=8, help="concurrent clients, 1..16")
     args = parser.parse_args()
     try:
-        run(args.docker_image, args.live)
+        run(args.docker_image, args.live, args.requests, args.workers)
     except Exception as exc:
         print(f"Smoke failed: {type(exc).__name__}; check configuration and service availability.")
         raise SystemExit(1) from None

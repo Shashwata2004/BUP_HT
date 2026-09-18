@@ -127,6 +127,20 @@ python scripts/run_public_cases.py --offline
 python scripts/smoke_test.py
 ```
 
+Hidden-case stress checks are included in normal offline pytest:
+
+```bash
+# 1,000 fixed-seed feasible scenarios, independent optimality oracles and decimal checks.
+pytest -q tests/test_hidden_optimizer.py
+# Systematic malformed-input fuzzing and 100 concurrent mixed requests with provider failures.
+pytest -q tests/test_hidden_api.py tests/test_hidden_provider.py
+# Real sockets, 100 requests, 16 concurrent clients; no paid model access.
+python scripts/smoke_test.py --requests 100 --workers 16
+python scripts/smoke_test.py --docker-image gridwise:latest --requests 100 --workers 16
+```
+
+The tracked `tests/data/semantic_hidden_style_cases.json` contains 150 independently authored notes in 50 three-note requests (25 notes per type). Its offline tests validate fixture shape, provider normalization and complete scheduling, **not language accuracy**. It includes unambiguous time boundaries, overlapping different directive types, energy-related distractors, and 30 adversarial notes, including long irrelevant context. See the [risk audit](docs/hidden-test-risk-audit.md) for assumptions and independently checked optimality.
+
 General offline tests use an independently constructed synthetic fixture and cover the exact schemas, all directive types, no-op, malformed output and repair, provider failures, prompt isolation, percentage/time output handling, battery transitions, rates, reserves, energy balance, neutrality, solar/grid restrictions, simultaneous directives, corrupted plans, safe errors, and 50 seeded scenarios checked against an independent exhaustive battery-state dynamic program. Mocked normalization tests check the adapter/guardrail path; they do **not** prove real-model language understanding.
 
 `--offline` reads the expected interpretation from each organizer case, passes it through our guardrails and optimizer, independently replays the plan, and compares cost against the organizer optimum within 0.01 BDT. **Expected result: 10/10**, with zero cost difference on the current baseline. Equivalent optimal action sequences are accepted. The official files remain unchanged in local, Git-ignored `data/`; production modules never read them, and the Docker image excludes them. Public wording, IDs, numeric values, and reference schedules are not hard-coded in application logic.
@@ -139,6 +153,14 @@ python scripts/run_public_cases.py --live
 
 # 48 independently written hidden-style notes in 16 realistic three-note requests.
 python scripts/run_live_benchmark.py
+
+# Expanded 150-note suite; paced to reduce quota pressure (incurs 50 model calls normally).
+python scripts/run_live_benchmark.py --suite tests/data/semantic_hidden_style_cases.json --pace-seconds 10
+# A focused rerun can select one or more --request IDs from that same JSON.
+
+# Small two-request concurrent real-provider benchmark (incurs quota).
+# Run separately from other live suites to avoid overlapping quota consumption.
+python scripts/run_burst_benchmark.py
 
 # One real POST through a temporary local API, including /health and schedule replay.
 python scripts/smoke_test.py --live
@@ -153,7 +175,7 @@ RUN_LIVE_LLM=1 pytest -q -m live
 
 The public runner checks interpretation semantics, ignores explanation wording, replays against both reported directives and organizer ground truth, validates schema/aggregates, compares cost, and reports calls, retries, token usage, and p50/p95/max timing. Live/API runners pause 7.5 seconds between calls by default to reduce Groq free-tier throttling; this pause is outside reported request latency and can be changed with `--pace-seconds`. Public live pytest cases use the same pacing. The synthetic benchmark reports overall/per-directive accuracy, no-op accuracy, time-window accuracy on applicable notes, numeric accuracy on numeric directives, and invalid-output/retry rates. Transport failures count as failed requests and remain in latency statistics; a persistent provider failure stops a direct live suite and reports unattempted cases explicitly. Use `--case SAMPLE-XX` on the public runner or `--request REQUEST-ID` on the synthetic runner for focused reruns. Normal pytest skips every network test unless `RUN_LIVE_LLM=1`. Full score latency requires p95 ≤5 seconds; ≤15 seconds earns partial latency credit.
 
-The final recorded live runs passed 10/10 official cases with exact optimal costs and 48/48 synthetic notes, including attack-bearing notes. Public p50/p95/max were 1.411/2.090/2.090 seconds; synthetic timings were 1.812/2.839/2.839 seconds. Both runs needed one call per request and zero repairs. These are measured samples, not guarantees for hidden wording, concurrency, or future provider availability. See [live verification](docs/live-verification.md) for methodology and limitations.
+The earlier baseline live runs passed 10/10 official cases with exact optimal costs and 48/48 synthetic notes, including attack-bearing notes. Public p50/p95/max were 1.411/2.090/2.090 seconds; synthetic timings were 1.812/2.839/2.839 seconds. See [live verification](docs/live-verification.md) for the expanded hidden-case results, current measurements, methodology and limitations. Measured samples do not guarantee hidden wording accuracy or future provider availability.
 
 By default, `smoke_test.py` starts actual uvicorn processes, a clearly isolated mock model provider, and verifies health plus 24 POSTs using eight concurrent clients. It makes no paid calls and shuts down its processes. `--live` instead uses the configured provider for exactly one POST. The mock provider lives under `tests/` and cannot be enabled in the production image.
 
