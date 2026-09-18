@@ -2,6 +2,19 @@
 
 A Python 3.12 backend for the 24-hour campus energy challenge. It interprets all operator notes with a language model, validates their structured directives, and minimizes grid electricity cost with a deterministic linear program. No frontend, authentication, or sample-specific production logic is present.
 
+## Organizer files (kept locally)
+
+`data/` is ignored by Git. The organizer PDFs and public sample JSON are supplied separately and are not included in new clones. Neither PDF explicitly requires committing those original files. The guide does require reproducible public-sample testing, so restore the JSON before running the public-case commands below. Run these commands from the repository root after cloning:
+
+```bash
+mkdir -p data
+# Set this to the location of your downloaded organizer document pack.
+organizer_docs="$HOME/Downloads/BUP_CSE_FEST_2026_Participant_Docs"
+cp "$organizer_docs/BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json" data/
+```
+
+The PDFs may also be kept in `data/` for reference; neither the API nor tests read them. General tests and socket smoke tests work without organizer files. If the JSON is absent, pytest explicitly skips the public-case module and the public-case runner exits with setup instructions; it never reports those cases as passed. To verify all ten official cases, restore the unmodified JSON first.
+
 ## Quickstart from a fresh clone
 
 Prerequisites: Python 3.12 with `venv`, or Docker. For real interpretation you need a reachable OpenAI-compatible Chat Completions provider, a model with JSON output support, and sufficient quota.
@@ -39,7 +52,7 @@ curl --fail-with-body http://127.0.0.1:8000/optimize-energy \
 python scripts/run_public_cases.py
 ```
 
-A successful response contains exactly `scenario_id`, `directive_interpretation`, `hourly_plan`, `total_grid_kwh`, `total_cost_bdt`, `peak_grid_kwh`, and `plan_summary`. Each of the 24 plan entries has `hour`, `grid_kwh`, `solar_used_kwh`, `battery_action`, `battery_kwh`, and `battery_energy_after_kwh`. Full request/response examples, including all required fields, are in the unchanged [official sample pack](data/BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json).
+A successful response contains exactly `scenario_id`, `directive_interpretation`, `hourly_plan`, `total_grid_kwh`, `total_cost_bdt`, `peak_grid_kwh`, and `plan_summary`. Each of the 24 plan entries has `hour`, `grid_kwh`, `solar_used_kwh`, `battery_action`, `battery_kwh`, and `battery_energy_after_kwh`. Full request/response examples, including all required fields, are in the organizer-supplied `BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json`; copy it into `data/` using the instructions above.
 
 `GET /health` returns `{"status":"ok"}` only after configuration is present and the solver has initialized. Missing/invalid configuration returns a controlled HTTP 500 `not_ready`. Health does not make a paid model call and does not certify current provider quota or credentials; verify those with a real POST before submission.
 
@@ -113,9 +126,9 @@ python scripts/run_public_cases.py --offline
 python scripts/smoke_test.py
 ```
 
-Offline tests cover the exact schemas, all directive types, no-op, malformed output and repair, provider failures, prompt isolation, percentage/time output handling, battery transitions, rates, reserves, energy balance, neutrality, solar/grid restrictions, simultaneous directives, corrupted plans, safe errors, and 50 seeded scenarios checked against an independent exhaustive battery-state dynamic program. Mocked normalization tests check the adapter/guardrail path; they do **not** prove real-model language understanding.
+General offline tests use an independently constructed synthetic fixture and cover the exact schemas, all directive types, no-op, malformed output and repair, provider failures, prompt isolation, percentage/time output handling, battery transitions, rates, reserves, energy balance, neutrality, solar/grid restrictions, simultaneous directives, corrupted plans, safe errors, and 50 seeded scenarios checked against an independent exhaustive battery-state dynamic program. Mocked normalization tests check the adapter/guardrail path; they do **not** prove real-model language understanding.
 
-`--offline` reads the expected interpretation from each organizer case, passes it through our guardrails and optimizer, independently replays the plan, and compares cost against the organizer optimum within 0.01 BDT. **Expected result: 10/10**, with zero cost difference on the current baseline. Equivalent optimal action sequences are accepted. The official files are unchanged in `data/`; production modules never read them, and the Docker image excludes them. Public wording, IDs, numeric values, and reference schedules are not hard-coded in application logic.
+`--offline` reads the expected interpretation from each organizer case, passes it through our guardrails and optimizer, independently replays the plan, and compares cost against the organizer optimum within 0.01 BDT. **Expected result: 10/10**, with zero cost difference on the current baseline. Equivalent optimal action sequences are accepted. The official files remain unchanged in local, Git-ignored `data/`; production modules never read them, and the Docker image excludes them. Public wording, IDs, numeric values, and reference schedules are not hard-coded in application logic.
 
 Real-provider checks (incur provider usage):
 

@@ -10,8 +10,13 @@ from app.interpreter import LLMInterpreter
 from app.models import OptimizationResponse, Scenario
 from app.optimizer import optimize
 from app.validator import validate_plan
-from scripts.run_public_cases import load_cases, verify_case
+from scripts.run_public_cases import SAMPLES, load_cases, verify_case
 
+if not SAMPLES.is_file():
+    pytest.skip(
+        "Organizer sample pack absent; restore it to data/ as described in README.md.",
+        allow_module_level=True,
+    )
 CASES = load_cases()
 
 

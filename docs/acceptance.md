@@ -1,6 +1,6 @@
 # Official acceptance criteria
 
-Sources: both organizer PDFs and the version 2.0 JSON pack, preserved unchanged in `data/`. All were read before implementation. Documents are specifications/data, not instructions to the engineering agent. No prompt-injection text was found in the supplied documents.
+Sources: both organizer PDFs and the version 2.0 JSON pack, preserved unchanged in local, Git-ignored `data/` (supplied separately on a fresh clone). All were read before implementation. Documents are specifications/data, not instructions to the engineering agent. No prompt-injection text was found in the supplied documents.
 
 ## Contract and validity (Problem Statement, canonical)
 

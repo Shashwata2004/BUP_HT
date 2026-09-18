@@ -5,6 +5,7 @@ Run locally on 2026-09-18 with Python 3.12.3 and Docker Engine 29.2.1. This reco
 | Check | Observed result |
 | --- | --- |
 | `pytest -q` | 211 passed; 10 live tests explicitly skipped. One upstream Starlette/AnyIO deprecation warning. |
+| Clean checkout without organizer files | 201 general tests passed; public-case module explicitly skipped. Runner exits with setup instructions. |
 | `ruff check app tests scripts` | Passed. |
 | `python -m compileall -q app tests scripts` | Passed. |
 | `pip check` | No broken requirements. |
@@ -16,7 +17,7 @@ Run locally on 2026-09-18 with Python 3.12.3 and Docker Engine 29.2.1. This reco
 | Secret/config exclusions | `.env`, `.env.production`, `.venv`, `.artifacts`, build logs ignored; Docker uses explicit context allowlist. |
 | Official source integrity | Copies in `data/` verified byte-for-byte against supplied source files using SHA-256. |
 
-All three organizer source files were read before coding. No prompt injection was detected. The PDFs and JSON were copied without edits; the production application never reads them.
+All three organizer source files were read before coding. No prompt injection was detected. The PDFs and JSON were copied without edits; the production application never reads them. They are now kept only in local, Git-ignored `data/`, and must be restored from the organizer pack on a fresh clone for public-case testing. General tests use an independent synthetic fixture.
 
 ## Public cost results
 

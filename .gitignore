@@ -20,3 +20,5 @@ build/
 secrets/
 .artifacts/
 .vscode/
+# Organizer documents and public sample pack are supplied separately.
+/data/

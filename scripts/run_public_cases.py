@@ -65,6 +65,13 @@ def verify_case(case: dict, response: OptimizationResponse) -> float:
 
 
 async def run(args: argparse.Namespace) -> int:
+    if not SAMPLES.is_file():
+        print(
+            "Organizer sample pack missing. Copy "
+            "BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json into data/ "
+            "as described in README.md."
+        )
+        return 2
     settings = Settings.from_env() if args.live else None
     if settings is not None and not settings.configured:
         print("Live mode requires LLM_API_KEY and LLM_MODEL (environment or .env).")

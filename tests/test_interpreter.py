@@ -154,7 +154,7 @@ def test_provider_modes(settings, scenario, case, mode):
         (
             "Store 50% of capacity from 8 PM to 10 PM.",
             "minimum_battery_reserve",
-            {"hours": [20, 21], "minimum_energy_kwh": 110},
+            {"hours": [20, 21], "minimum_energy_kwh": 150},
         ),
     ],
 )
