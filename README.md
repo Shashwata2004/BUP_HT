@@ -17,9 +17,11 @@ operator notes -> Groq LLM -> deterministic guardrails -> HiGHS optimizer -> fin
 
 The Render service was externally verified with exact health JSON, a real Groq-backed request, and all ten official public cases. The deployed official-case run passed 10/10 with exact organizer-optimal costs; measured request latency was p50 1.471 seconds and p95/max 2.017 seconds.
 
-## Organizer files (kept locally)
+## Public sample input and organizer files
 
-`data/` is ignored by Git. The organizer PDFs and public sample JSON are supplied separately and are not included in new clones. Neither PDF explicitly requires committing those original files. The guide does require reproducible public-sample testing, so restore the JSON before running the public-case commands below. Run these commands from the repository root after cloning:
+[`examples/public_sample_request.json`](examples/public_sample_request.json) is exactly `cases[0].input` from the official public organizer JSON. It is tracked only so judges can reproduce one `/optimize-energy` request from a fresh clone. Production code never reads it, and public sample wording, outputs, schedules, IDs, and numeric values are not hard-coded in application logic.
+
+The complete organizer PDFs and public sample JSON remain local in Git-ignored `data/`. They are optional for running the service and the tracked example above. Restore the unmodified public JSON only when running the separate ten-case public verification command:
 
 ```bash
 mkdir -p data
@@ -28,7 +30,7 @@ organizer_docs="$HOME/Downloads/BUP_CSE_FEST_2026_Participant_Docs"
 cp "$organizer_docs/BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json" data/
 ```
 
-The PDFs may also be kept in `data/` for reference; neither the API nor tests read them. General tests and socket smoke tests work without organizer files. If the JSON is absent, pytest explicitly skips the public-case module and the public-case runner exits with setup instructions; it never reports those cases as passed. To verify all ten official cases, restore the unmodified JSON first.
+The PDFs may also be kept in `data/` for reference; neither the API nor production code reads them. General tests, the tracked sample request, and socket smoke tests work without organizer files. If the complete JSON is absent, pytest explicitly skips the ten-case public module and the public-case runner exits with setup instructions; it never reports those cases as passed.
 
 ## Quickstart from a fresh clone
 
@@ -54,17 +56,17 @@ source .venv/bin/activate
 curl --fail-with-body http://127.0.0.1:8000/health
 # Expected HTTP 200: {"status":"ok"}
 
-# Extract an unchanged organizer request; this is validation tooling, not production logic.
-mkdir -p .artifacts
-python - <<'PY'
-import json
-from pathlib import Path
-cases = json.loads(Path('data/BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json').read_text())
-Path('.artifacts/request.json').write_text(json.dumps(cases['cases'][0]['input']))
-PY
-curl --fail-with-body http://127.0.0.1:8000/optimize-energy \
-  -H 'Content-Type: application/json' --data-binary @.artifacts/request.json
-python scripts/run_public_cases.py
+# Official public sample input included for judge reproducibility.
+curl --fail-with-body \
+  http://127.0.0.1:8000/optimize-energy \
+  -H 'Content-Type: application/json' \
+  --data-binary @examples/public_sample_request.json
+
+# The same tracked input against the deployed service.
+curl --fail-with-body \
+  https://bup-ht.onrender.com/optimize-energy \
+  -H 'Content-Type: application/json' \
+  --data-binary @examples/public_sample_request.json
 ```
 
 A successful response contains exactly `scenario_id`, `directive_interpretation`, `hourly_plan`, `total_grid_kwh`, `total_cost_bdt`, `peak_grid_kwh`, and `plan_summary`. Each of the 24 plan entries has `hour`, `grid_kwh`, `solar_used_kwh`, `battery_action`, `battery_kwh`, and `battery_energy_after_kwh`. Full request/response examples, including all required fields, are in the organizer-supplied `BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json`; copy it into `data/` using the instructions above.
